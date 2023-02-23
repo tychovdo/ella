@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pickle
-from sklearn.datasets import make_moons
+#from sklearn.datasets import make_moons
 from typing import Union, Callable 
 import numpy as np
 import torch
@@ -156,42 +156,42 @@ class Snelson(Dataset):
         return torch.linspace(x_min-offset, x_max+offset, steps=density).unsqueeze(-1)
 
 
-class TwoMoons(Dataset):
-    def __init__(
-        self, train=True, random_seed=6, noise=0.3, n_samples=150, double=False
-    ):
-        self.train = train
-        self.seed = random_seed if train else random_seed - 1
-        X, y = make_moons(n_samples=n_samples, noise=noise, random_state=self.seed)
-        self.C = 2  # binary problem
-
-        if double:
-            self.data = torch.from_numpy(X).double()
-            self.targets = torch.from_numpy(y).double()
-        else:
-            self.data = torch.from_numpy(X).float()
-            self.targets = torch.from_numpy(y).float()
-
-    def __getitem__(self, index):
-        return self.data[index], self.targets[index]
-
-    def __len__(self):
-        return self.data.shape[0]
-
-    @property
-    def bounding_box(self):
-        x1_min, x1_max = self.data[:, 0].min(), self.data[:, 0].max()
-        x2_min, x2_max = self.data[:, 1].min(), self.data[:, 1].max()
-        return ((x1_min, x1_max), (x2_min, x2_max))
-
-    def grid(self, density=100, offset=1.0):
-        ((x1_min, x1_max), (x2_min, x2_max)) = self.bounding_box
-        xx, yy = np.meshgrid(
-            np.linspace(x1_min-offset, x1_max+offset, density),
-            np.linspace(x2_min-offset, x2_max+offset, density),
-        )
-        grid = torch.from_numpy(np.c_[xx.ravel(), yy.ravel()])
-        return grid, xx, yy
+# class TwoMoons(Dataset):
+#     def __init__(
+#         self, train=True, random_seed=6, noise=0.3, n_samples=150, double=False
+#     ):
+#         self.train = train
+#         self.seed = random_seed if train else random_seed - 1
+#         X, y = make_moons(n_samples=n_samples, noise=noise, random_state=self.seed)
+#         self.C = 2  # binary problem
+# 
+#         if double:
+#             self.data = torch.from_numpy(X).double()
+#             self.targets = torch.from_numpy(y).double()
+#         else:
+#             self.data = torch.from_numpy(X).float()
+#             self.targets = torch.from_numpy(y).float()
+# 
+#     def __getitem__(self, index):
+#         return self.data[index], self.targets[index]
+# 
+#     def __len__(self):
+#         return self.data.shape[0]
+# 
+#     @property
+#     def bounding_box(self):
+#         x1_min, x1_max = self.data[:, 0].min(), self.data[:, 0].max()
+#         x2_min, x2_max = self.data[:, 1].min(), self.data[:, 1].max()
+#         return ((x1_min, x1_max), (x2_min, x2_max))
+# 
+#     def grid(self, density=100, offset=1.0):
+#         ((x1_min, x1_max), (x2_min, x2_max)) = self.bounding_box
+#         xx, yy = np.meshgrid(
+#             np.linspace(x1_min-offset, x1_max+offset, density),
+#             np.linspace(x2_min-offset, x2_max+offset, density),
+#         )
+#         grid = torch.from_numpy(np.c_[xx.ravel(), yy.ravel()])
+#         return grid, xx, yy
 
 
 class RotatedMNIST(datasets.MNIST):

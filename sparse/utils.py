@@ -6,7 +6,9 @@ from torch import nn
 from torch.nn.utils.convert_parameters import parameters_to_vector
 
 from sparse.conv import SConv2d
+from sparse.linear import SLinear
 from asdfghjkl.operations.sconv_aug import SConv2dAug
+from asdfghjkl.operations.slinear_aug import SLinearAug
 
 from laplace import FullLaplace, KronLaplace, DiagLaplace, FunctionalLaplace
 
@@ -90,7 +92,9 @@ def convert_model(model, conv_class, reduce_factor=1.0, reduce_args={}, verbose=
 
     # iterate through immediate child modules. Note, the recursion is done by our code no need to use named_modules()
     for mod, module in model._modules.items():
-        if isinstance(module, nn.Conv2d) and module.kernel_size[0] >= min_convert_size and module.kernel_size[1] >= min_convert_size:
+        if isinstance(module, nn.Conv2d) and \
+                        (module.kernel_size[0] >= min_convert_size) and \
+                        (module.kernel_size[1] >= min_convert_size) and (conv_class in [SConv2d, SConv2dAug]):
             # get original layer properties
             in_channels = module.in_channels
             out_channels = module.out_channels
@@ -128,15 +132,33 @@ def convert_model(model, conv_class, reduce_factor=1.0, reduce_args={}, verbose=
                                         kernel_type=kernel_type,
                                         solver=solver, noise_std=noise_std, free_anchor_loc=free_anchor_loc,
                                         **kwargs)
-            elif conv_class in [VariationalConv2d]:
-                reduce_args['new_std'] = 0.0
-                new_module = conv_class(in_channels, out_channels, kernel_size, stride=stride, padding=padding,
-                                        dilation=dilation, groups=groups, bias=has_bias, padding_mode=padding_mode, device=device,
+            else:
+                raise NotImplementedError(f"Unknown class: {conv_class}")
+
+            # copy weights for grid
+            new_module._set_u_from_weight(module.weight, module.bias)
+
+            # reduce, if needed
+            if reduce_factor != 1.0:
+                new_module.reduce(reduce_factor, **reduce_args)
+
+            # replace object
+            setattr(model, mod, new_module)
+
+        if isinstance(module, nn.Linear) and conv_class in [SLinear, SLinearAug]:
+            # get original layer properties
+            in_features = module.in_features
+            out_features = module.out_features
+            has_bias = module.bias is not None
+
+            device = module.weight.device
+
+            if conv_class in [SLinear, SLinearAug]:
+                new_module = conv_class(in_features, out_features,
+                                        bias=has_bias, device=device,
                                         learn_omega=learn_omega, learn_scale=learn_scale, learn_noise=learn_noise,
                                         kernel_type=kernel_type,
-                                        independent_rsample=independent_rsample, free_anchor_loc=free_anchor_loc,
-                                        solver=solver, noise_std=noise_std, dt=dt, cholesky=cholesky, mask=mask,
-                                        channel_covariances=channel_covariances, detach_kl=detach_kl, detach_kl2=detach_kl2,
+                                        solver=solver, noise_std=noise_std, free_anchor_loc=free_anchor_loc,
                                         **kwargs)
             else:
                 raise NotImplementedError(f"Unknown class: {conv_class}")

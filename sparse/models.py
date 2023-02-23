@@ -205,7 +205,7 @@ class ResNet(nn.Module):
                 nn.init.normal_(m.conv1.weight,
                                 mean=0,
                                 std=np.sqrt(2 / (m.conv1.weight.shape[0] * np.prod(m.conv1.weight.shape[2:]))) * self.num_layers ** (-0.5))
-                nn.init.constant_(m.conv2.weight, 0)
+                nn.init.constant_(m.conv2.weight, 0) 
             elif isinstance(m, nn.Linear):
                 nn.init.constant_(m.weight, 0)
                 nn.init.constant_(m.bias, 0)
