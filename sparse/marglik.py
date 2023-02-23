@@ -245,7 +245,7 @@ def marglik_optimization(model,
     scheduler = get_scheduler(scheduler, optimizer.base_optimizer if sam else optimizer,
                               train_loader, n_epochs, lr, lr_min)
 
-    n_steps = ((n_epochs - n_epochs_burnin) // marglik_frequency) * n_hypersteps_prior
+    n_steps = ((n_epochs + 1 - n_epochs_burnin) // marglik_frequency) * n_hypersteps_prior
     hyper_optimizer = Adam(hyperparameters, lr=lr_hyp)
     hyper_scheduler = CosineAnnealingLR(hyper_optimizer, n_steps, eta_min=lr_hyp_min)
     if optimize_aug:
@@ -291,7 +291,8 @@ def marglik_optimization(model,
                 if sam_with_prior:
                     theta = parameters_to_vector(model.parameters())
                     loss += (0.5 * (delta * theta) @ theta) / N / crit_factor
-                loss.backward()
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    loss.backward()
                 optimizer.first_step(zero_grad=True)
                 # 2. step
                 if method == 'lila':
@@ -300,12 +301,14 @@ def marglik_optimization(model,
                     f = model(X)
                 theta = parameters_to_vector(model.parameters())
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                loss.backward()
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    loss.backward()
                 optimizer.second_step(zero_grad=True)
             else:
                 theta = parameters_to_vector(model.parameters())
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                loss.backward()
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    loss.backward()
                 optimizer.step()
 
             epoch_loss += loss.cpu().item() / len(train_loader)
@@ -349,7 +352,10 @@ def marglik_optimization(model,
             if use_wandb:
                 wandb.log(epoch_log, step=epoch, commit=((epoch % 10) == 0))
             print(epoch, marglik_frequency, n_epochs_burnin)
+            print('BURNIN: ', epoch, n_epochs_burnin)
             continue
+        else:
+            print('NO BURNIN: ', epoch, n_epochs_burnin)
 
         # optimizer hyperparameters by differentiating marglik
         # 1. fit laplace approximation
@@ -381,7 +387,8 @@ def marglik_optimization(model,
                 marglik = -lap.log_marginal_likelihood(prior_prec, sigma_noise) / N
             else:  # fit with updated hparams
                 marglik = -lap.log_marginal_likelihood() / N
-            marglik.backward()
+            with torch.autograd.detect_anomaly(check_nan=True):
+                marglik.backward()
             margliks_local.append(marglik.item())
             if i < n_hypersteps_prior:
                 hyper_optimizer.step()
@@ -435,9 +442,11 @@ def marglik_optimization(model,
                 # curv closure creates gradient already, need to zero
                 aug_optimizer.zero_grad()
                 # compute grad wrt. neg. log-lik
-                (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
                 # compute grad wrt. log det = 0.5 vec(P_inv) @ (grad-vec H)
-                (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
+                with torch.autograd.detect_anomaly(check_nan=True):
+                    (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
                 aug_grad = (aug_grad + gradient_to_vector(augmenter.parameters()).data.clone())
 
             lap.backend.differentiable = False

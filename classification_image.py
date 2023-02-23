@@ -25,9 +25,13 @@ from data_utils.utils import (
     TensorDataLoader, SubsetTensorDataLoader, GroupedSubsetTensorDataLoader, dataset_to_tensors
 )
 
+from data_utils.augmentation import CIFAR10_augment
+
 from sparse.conv import SConv2d
 from asdfghjkl.operations.sconv_aug import SConv2dAug
 from sparse.utils import convert_model
+from sparse.rpp_conv import RPP_D_Conv, D_Conv, D_FC
+from sparse.rpp_conv import RPP_D_Conv_B, D_Conv_B, D_FC_B
 
 
 def get_dataset(dataset, data_root, download_data, transform):
@@ -101,7 +105,7 @@ def main(
     subset_size, n_samples_aug, softplus, init_aug, lr, lr_min, lr_hyp, lr_hyp_min, lr_aug, lr_aug_min, grouped_loader,
     prior_prec_init, n_epochs_burnin, marglik_frequency, n_hypersteps, n_hypersteps_prior, random_flip, sam, sam_with_prior,
     last_logit_constant, save, device, download_data, data_root, use_wandb, independent_outputs, kron_jac, single_output,
-    sparse
+    data_augmentation, data_augmentation_marglik, sparse
 ):
     # dataset-specific static transforms (preprocessing)
     if 'mnist' in dataset:
@@ -134,11 +138,19 @@ def main(
     X_test, y_test = dataset_to_tensors(test_dataset, None, device)
 
     if method == 'lila':
+        assert not data_augmentation
+        assert not data_augmentation_marglik
         augmenter = AffineLayer2d(n_samples=n_samples_aug, init_value=init_aug,
                                   softplus=softplus, random_flip=random_flip).to(device)
+        augmenter_valid = augmenter_marglik = augmenter
         augmenter.rot_factor.requires_grad = True
+    elif data_augmentation:
+        assert 'cifar' in dataset
+        augmenter = CIFAR10_augment
+        augmenter_valid = None
+        augmenter_marglik = augmenter if data_augmentation_marglik else None
     else:
-        augmenter = None
+        augmenter = augmenter_valid = augmenter_marglik = None
     optimize_aug = (method == 'lila')
 
     temperature = 1.0
@@ -149,8 +161,8 @@ def main(
     valid_loader = TensorDataLoader(X_test, y_test, transform=augmenter, batch_size=batch_size, detach=True)
     if bound == 'None':
         stochastic_grad = False
-        marglik_loader = TensorDataLoader(X_train, y_train, transform=augmenter, batch_size=ml_batch_size, shuffle=True, detach=True)
-        partial_loader = TensorDataLoader(X_train, y_train, transform=augmenter, batch_size=pl_batch_size, shuffle=True, detach=False)
+        marglik_loader = TensorDataLoader(X_train, y_train, transform=augmenter_marglik, batch_size=ml_batch_size, shuffle=True, detach=True)
+        partial_loader = TensorDataLoader(X_train, y_train, transform=augmenter_marglik, batch_size=pl_batch_size, shuffle=True, detach=False)
     else:
         stochastic_grad = True
         data_factor = 1.0
@@ -164,7 +176,7 @@ def main(
             raise ValueError('Invalid bound', bound)
         
         DataLoaderCls = GroupedSubsetTensorDataLoader if grouped_loader else SubsetTensorDataLoader
-        marglik_loader = DataLoaderCls(X_train, y_train, transform=augmenter, subset_size=ml_batch_size,
+        marglik_loader = DataLoaderCls(X_train, y_train, transform=augmenter_marglik, subset_size=ml_batch_size,
                                        detach=False, data_factor=data_factor)
         partial_loader = None
 
@@ -207,8 +219,37 @@ def main(
             optimizer = 'Adam'
             model = ViT(augmented=optimize_aug, fixup=False, last_logit_constant=last_logit_constant,
                         num_classes=n_classes)
+        elif model == 'd_conv':
+            optimizer = 'SGD'
+            model = D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
+        elif model == 'd_fc':
+            optimizer = 'SGD'
+            model = D_FC(in_ch=3, num_classes=n_classes, alpha=10) 
+        elif model == 'rpp_d_conv':
+            optimizer = 'SGD'
+            model = RPP_D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
+        elif model == 'd_conv_b':
+            optimizer = 'SGD'
+            model = D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
+        elif model == 'd_fc_b':
+            optimizer = 'SGD'
+            model = D_FC_B(in_ch=3, num_classes=n_classes, alpha=10) 
+        elif model == 'rpp_d_conv_b':
+            optimizer = 'SGD'
+            model = RPP_D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
         else:
             raise ValueError('Unavailable model for cifar')
+
+    
+    if False: # HACKY NEW INIT
+        for name, param in model.named_parameters():
+            with torch.no_grad():
+                if 'bias' in name:
+                    param.data.zero_()
+                elif 'weight' in name:
+                    torch.nn.init.xavier_uniform(param)
+                else:
+                    raise NotImplementedError(f"Unknown initialisation for param with name '{name}'.")
 
     if sparse:
         if optimize_aug:
@@ -229,8 +270,6 @@ def main(
                                 conv_class=SConv2d,
                                 kernel_type='rbf',
                                 solver='solve', noise_std=0.001)
-    print(model)
-
 
     model.to(device)
 
@@ -247,7 +286,7 @@ def main(
         sam=sam, sam_with_prior=sam_with_prior,
         n_hypersteps=n_hypersteps, marglik_frequency=marglik_frequency, laplace=laplace,
         prior_structure=prior_structure, backend=backend, n_epochs_burnin=n_epochs_burnin,
-        method=method, augmenter=augmenter, lr_min=lr_min, scheduler='cos', optimizer=optimizer,
+        method=method, augmenter=augmenter_valid, lr_min=lr_min, scheduler='cos', optimizer=optimizer,
         n_hypersteps_prior=n_hypersteps_prior, temperature=temperature, lr_aug_min=lr_aug_min,
         prior_prec_init=prior_prec_init, stochastic_grad=stochastic_grad, use_wandb=use_wandb,
         track_kron_la=True, independent=independent_outputs, kron_jac=kron_jac, single_output=single_output
@@ -304,7 +343,7 @@ if __name__ == '__main__':
         'cifar10', 'cifar10_r90', 'cifar10_r180', 'translated_cifar10', 'scaled_cifar10',
         'cifar100', 'cifar100_r90', 'cifar100_r180', 'translated_cifar100', 'scaled_cifar100'
     ])
-    parser.add_argument('--model', default='mlp', choices=['mlp', 'cnn', 'resnet', 'resnet_8_8', 'wrn', 'mlpmixer', 'vit'])
+    parser.add_argument('--model', default='mlp', choices=['mlp', 'cnn', 'resnet', 'resnet_8_8', 'wrn', 'mlpmixer', 'vit', 'd_conv', 'd_fc', 'rpp_d_conv', 'd_conv_b', 'd_fc_b', 'rpp_d_conv_b'])
     parser.add_argument('--n_epochs', default=500, type=int)
     parser.add_argument('--n_epochs_burnin', default=10, type=int)
     parser.add_argument('--independent_outputs', default=False, action=argparse.BooleanOptionalAction,
@@ -337,6 +376,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr_hyp_min', default=0.1, type=float)
     parser.add_argument('--lr_aug', default=0.005, type=float)
     parser.add_argument('--lr_aug_min', default=0.00001, type=float)
+    parser.add_argument('--data_augmentation', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--data_augmentation_marglik', default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument('--device', default='cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--save', default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument('--download_data', default=False, action=argparse.BooleanOptionalAction)
@@ -362,5 +403,5 @@ if __name__ == '__main__':
         run_name += '-' + str(uuid.uuid5(uuid.NAMESPACE_DNS, str(args)))[:4]
         load_dotenv()
         wandb.init(project='sparse', config=config, name=run_name, tags=tags,
-                   dir='is')
+                   dir='tmp')
     main(**args)
