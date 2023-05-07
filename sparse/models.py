@@ -9,7 +9,6 @@ from einops.layers.torch import Rearrange, Reduce
 from asdfghjkl.operations import Bias, Scale
 from asdfghjkl.operations.conv_aug import Conv2dAug, Conv1dAug
 
-
 # This file contains different NN Models:
 # MLP, LeNet (CNN), Fixup ResNet, Fixup WRN, MLP Mixer, SimpleViT,
 # all of which can also be used augmented

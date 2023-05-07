@@ -5,10 +5,8 @@ import torch
 from torch import nn
 from torch.nn.utils.convert_parameters import parameters_to_vector
 
-from sparse.conv import SConv2d
-from sparse.linear import SLinear
-from asdfghjkl.operations.sconv_aug import SConv2dAug
-from asdfghjkl.operations.slinear_aug import SLinearAug
+from sparse.sconv2d import SConv2d
+# from sparse.slinear import SLinear2d
 
 from laplace import FullLaplace, KronLaplace, DiagLaplace, FunctionalLaplace
 
@@ -88,7 +86,7 @@ def convert_model(model, conv_class, reduce_factor=1.0, reduce_args={}, verbose=
                   channel_covariances=False, detach_kl=False, detach_kl2=False, min_convert_size=1,
                   **kwargs):
     if verbose:
-        param_count_1 = len(torch.nn.utils.parameters_to_vector(model.parameters()))
+        param_count_1 = len(torch.cat([x.reshape(-1) for x in model.parameters()]))
 
     # iterate through immediate child modules. Note, the recursion is done by our code no need to use named_modules()
     for mod, module in model._modules.items():
@@ -145,33 +143,33 @@ def convert_model(model, conv_class, reduce_factor=1.0, reduce_args={}, verbose=
             # replace object
             setattr(model, mod, new_module)
 
-        if isinstance(module, nn.Linear) and conv_class in [SLinear, SLinearAug]:
-            # get original layer properties
-            in_features = module.in_features
-            out_features = module.out_features
-            has_bias = module.bias is not None
+        # if isinstance(module, nn.Linear) and conv_class in [SLinear, SLinearAug]:
+        #     # get original layer properties
+        #     in_features = module.in_features
+        #     out_features = module.out_features
+        #     has_bias = module.bias is not None
 
-            device = module.weight.device
+        #     device = module.weight.device
 
-            if conv_class in [SLinear, SLinearAug]:
-                new_module = conv_class(in_features, out_features,
-                                        bias=has_bias, device=device,
-                                        learn_omega=learn_omega, learn_scale=learn_scale, learn_noise=learn_noise,
-                                        kernel_type=kernel_type,
-                                        solver=solver, noise_std=noise_std, free_anchor_loc=free_anchor_loc,
-                                        **kwargs)
-            else:
-                raise NotImplementedError(f"Unknown class: {conv_class}")
+        #     if conv_class in [SLinear, SLinearAug]:
+        #         new_module = conv_class(in_features, out_features,
+        #                                 bias=has_bias, device=device,
+        #                                 learn_omega=learn_omega, learn_scale=learn_scale, learn_noise=learn_noise,
+        #                                 kernel_type=kernel_type,
+        #                                 solver=solver, noise_std=noise_std, free_anchor_loc=free_anchor_loc,
+        #                                 **kwargs)
+        #     else:
+        #         raise NotImplementedError(f"Unknown class: {conv_class}")
 
-            # copy weights for grid
-            new_module._set_u_from_weight(module.weight, module.bias)
+        #     # copy weights for grid
+        #     new_module._set_u_from_weight(module.weight, module.bias)
 
-            # reduce, if needed
-            if reduce_factor != 1.0:
-                new_module.reduce(reduce_factor, **reduce_args)
+        #     # reduce, if needed
+        #     if reduce_factor != 1.0:
+        #         new_module.reduce(reduce_factor, **reduce_args)
 
-            # replace object
-            setattr(model, mod, new_module)
+        #     # replace object
+        #     setattr(model, mod, new_module)
 
     for immediate_child_module in model.children():
         convert_model(immediate_child_module, conv_class=conv_class,
@@ -260,4 +258,19 @@ def wandb_log_prior(prior_prec, prior_structure, model):
             np_histogram=(hist.numpy().tolist(), edges.numpy().tolist())
         )}
         wandb.log(log, commit=False)
+
+def wandb_log_effective_dimensionality(effect_dim, prior_structure, model):
+    if prior_structure == 'scalar':
+        wandb.log({'hyperparams/effect_dim': effect_dim[0]}, commit=False)
+    elif prior_structure == 'layerwise':
+        log = {f'hyperparams/effect_dim_{n}': p for p, (n, _) in
+               zip(effect_dim, model.named_parameters())}
+        wandb.log(log, commit=False)
+    elif prior_structure == 'diagonal':
+        hist, edges = effect_dim.data.cpu().histogram(bins=64)
+        log = {f'hyperparams/effect_dim': wandb.Histogram(
+            np_histogram=(hist.numpy().tolist(), edges.numpy().tolist())
+        )}
+        wandb.log(log, commit=False)
+
 

@@ -1,252 +1,227 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from asdfghjkl.operations import Bias, Scale
+
+from sparse.flinear2d import FLinear2d
+from sparse.slinear2d import SLinear2d
+from sparse.sconv2d import SConv2d
 
 
-class LinearConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, h, w):
-        super(LinearConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, padding=1)
-        self.linear = nn.Linear(in_ch*h*w, out_ch*h*w)
-        self.h = h
-        self.w = w
-        self.activation = F.relu
-        
-    def forward(self, x):
-        convout = self.conv(x)
-        linout = self.linear(x.view(x.shape[0], -1))
-        linout = linout.view(convout.shape)
-        
-        return self.activation(linout + convout)
+def subsample2(x):
+    x1 = x[:, :, ::2, ::2]
+    x2 = x[:, :, 1::2, ::2]
+    x3 = x[:, :, ::2, 1::2]
+    x4 = x[:, :, 1::2, 1::2]
     
-class RPPConv(nn.Module):
-    def __init__(self, num_layers=3, ch=32, in_ch=3, num_classes=10, h=3, w=2):
-        super(RPPConv, self).__init__()
-        layers = [LinearConvBlock(in_ch, ch, h, w)]
-        for _ in range(num_layers-1):
-            layers.append( LinearConvBlock(ch, ch, h, w) )
-        
-        self.conv_net = nn.Sequential(*layers)
-        self.classifier = nn.Linear(ch*h*w, num_classes)
-        
-    
-    def forward(self, x):
-        conv_out = self.conv_net(x)
-        return self.classifier(conv_out.view(x.shape[0], -1))
-
-    
-    
-class ConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(ConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch,3,padding=1)
-        self.activation = F.relu
-        
-    def forward(self, x):
-        convout = self.conv(x)
-        return self.activation(convout)
-        
-class ConvNet(nn.Module):
-    def __init__(self, num_layers=3, ch=32, outdim=1, h=3, w=2):
-        super(ConvNet, self).__init__()
-        layers = [ConvBlock(1, ch)]
-        for _ in range(num_layers-1):
-            layers.append( ConvBlock(ch, ch) )
-        
-        self.conv_net = nn.Sequential(*layers)
-        self.classifier = nn.Linear(ch*h*w, outdim)
-        
-    def forward(self, x):
-        conv_out = self.conv_net(x)
-        return self.classifier(conv_out.view(x.shape[0], -1))
-    
-    
-class LinearBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, h, w):
-        super(LinearBlock, self).__init__()
-        self.linear = nn.Linear(in_ch*h*w, out_ch*h*w)
-        self.h = h
-        self.w = w
-        self.activation = F.relu
-        
-    def forward(self, x):
-        linout = self.linear(x.view(x.shape[0], -1))
-        return self.activation(linout)
-        
-class LinearNet(nn.Module):
-    def __init__(self, num_layers=3, ch=32, outdim=1, h=3, w=2):
-        super(LinearNet, self).__init__()
-        layers = [LinearBlock(1, ch, h, w)]
-        for _ in range(num_layers-1):
-            layers.append( LinearBlock(ch, ch, h, w) )
-        
-        self.conv_net = nn.Sequential(*layers)
-        self.classifier = nn.Linear(ch*h*w, outdim)
-        
-    def forward(self, x):
-        conv_out = self.conv_net(x)
-        return self.classifier(conv_out.view(x.shape[0], -1))
-
-class NNLinearBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, h, w, stride=1):
-        super(NNLinearBlock, self).__init__()
-        self.linear = nn.Linear(int(in_ch*h*w), int(out_ch*h*w/(stride**2)))
-        self.stride=stride
-        self.out_ch = out_ch
-        self.h = h
-        self.w = w
-        self.activation = F.relu
-        self.linscale = Scale()
-        # self.bn = nn.BatchNorm2d(out_ch)
-        
-    def forward(self, x):
-        # linout = self.linear(x.view(x.shape[0], -1))
-        linout = self.linear(x.reshape(x.shape[0], -1))
-        linout = linout.view(x.shape[0], self.out_ch, 
-                             int(self.h/self.stride), int(self.w/self.stride))
-        linout = self.linscale(linout)
-        # out = self.bn(linout)
-        out = linout
-        return self.activation(out)
-    
-class NNLinearConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, h, w, stride=1):
-        super(NNLinearConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1)
-        self.linear = nn.Linear(int(in_ch*h*w), int(out_ch*h*w/(stride**2)))
-        self.h = h
-        self.w = w
-        self.activation = F.relu
-
-        self.linscale = Scale()
-        self.convscale = Scale()
-        # self.bn = nn.BatchNorm2d(out_ch)
-        
-    def forward(self, x):
-        convout = self.conv(x)
-        convout = self.convscale(convout)
-
-        #linout = self.linear(x.view(x.shape[0], -1))
-        linout = self.linear(x.reshape(x.shape[0], -1))
-        linout = linout.view(convout.shape)
-        linout = self.linscale(linout)
-        
-        # out = self.bn(linout + convout)
-        out = linout + convout
-        return self.activation(out)
-    
-class NNConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, h, w, stride=1):
-        super(NNConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1)
-        self.activation = F.relu
-        self.convscale = Scale()
-        # self.bn = nn.BatchNorm2d(out_ch)
-        
-    def forward(self, x):
-        # convout = self.bn(self.conv(x))
-        convout  = self.conv(x)
-        convout  = self.convscale(convout)
-        return self.activation(convout)
+    x1m, x2m, x3m, x4m = x1.max(), x2.max(), x3.max(), x4.max()
+    maxval = max(x1m, x2m, x3m, x4m)
+    if x1m == maxval:
+        return x1
+    elif x2m == maxval:
+        return x2
+    elif x3m == maxval:
+        return x3
+    else:
+        return x4
 
 class BNLinearBlock(nn.Module):
     def __init__(self, in_ch, out_ch, h, w, stride=1):
         super(BNLinearBlock, self).__init__()
         self.linear = nn.Linear(int(in_ch*h*w), int(out_ch*h*w/(stride**2)))
+        self.linear.bias.data.zero_()
         self.stride=stride
         self.out_ch = out_ch
         self.h = h
         self.w = w
         self.activation = F.relu
-        # self.bn = nn.BatchNorm2d(out_ch)
         
     def forward(self, x):
-        # linout = self.linear(x.view(x.shape[0], -1))
         linout = self.linear(x.reshape(x.shape[0], -1))
         linout = linout.view(x.shape[0], self.out_ch, 
                              int(self.h/self.stride), int(self.w/self.stride))
-        # out = self.bn(linout)
         out = linout
         return self.activation(out)
+
+class BNConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, h, w, stride=1):
+        super(BNConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular')
+        torch.nn.init.kaiming_uniform_(self.conv.weight, nonlinearity='relu')
+        self.conv.bias.data.zero_()
+        self.stride = stride
+        self.activation = F.relu
+        
+    def forward(self, x):
+        convout = self.conv(x)
+        
+        if self.stride == 2:
+            convout = subsample2(convout)
+        elif self.stride > 2:
+            raise NotImplementedError(f"Equivariance for stride {self.stride} not implemented yet")
+        
+        return self.activation(convout)
     
 class BNLinearConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch, h, w, stride=1):
         super(BNLinearConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1)
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular')
+        torch.nn.init.kaiming_uniform_(self.conv.weight, nonlinearity='relu')
+        self.conv.bias.data.zero_()
+        self.stride = stride
         self.linear = nn.Linear(int(in_ch*h*w), int(out_ch*h*w/(stride**2)))
+        self.linear.bias.data.zero_()
         self.h = h
         self.w = w
         self.activation = F.relu
-        # self.bn = nn.BatchNorm2d(out_ch)
         
     def forward(self, x):
         convout = self.conv(x)
-        #linout = self.linear(x.view(x.shape[0], -1))
+
+        if self.stride == 2:
+            convout = subsample2(convout)
+        elif self.stride > 2:
+            raise NotImplementedError(f"Equivariance for stride {self.stride} not implemented yet")
+
         linout = self.linear(x.reshape(x.shape[0], -1))
         linout = linout.view(convout.shape)
         
-        # out = self.bn(linout + convout)
-        out = linout + convout
+        out = 0.5 * (linout + convout)
         return self.activation(out)
-    
-class BNConvBlock(nn.Module):
+
+class FLinearBlock(nn.Module):
     def __init__(self, in_ch, out_ch, h, w, stride=1):
-        super(BNConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1)
+        super(FLinearBlock, self).__init__()
+        self.linear = FLinear2d(in_ch, out_ch, (h, w), (h//stride, w//stride))
+        self.linear.lin_U.bias.data.zero_()
+        self.linear.lin_V.bias.data.zero_()
+        self.stride=stride
+        self.out_ch = out_ch
+        self.h = h
+        self.w = w
         self.activation = F.relu
-        # self.bn = nn.BatchNorm2d(out_ch)
         
     def forward(self, x):
-        # convout = self.bn(self.conv(x))
+        linout = self.linear(x)
+        out = linout
+        out = self.activation(out)
+        return out
+
+
+class FLinearConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, h, w, stride=1):
+        super(FLinearConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular')
+        torch.nn.init.kaiming_uniform_(self.conv.weight, nonlinearity='relu')
+        self.conv.bias.data.zero_()
+        self.stride = stride
+        self.linear = FLinear2d(in_ch, out_ch, (h, w), (h//stride, w//stride))
+        self.linear.lin_U.bias.data.zero_()
+        self.linear.lin_V.bias.data.zero_()
+        self.h = h
+        self.w = w
+        self.activation = F.relu
+        
+    def forward(self, x):
+        convout = self.conv(x)
+
+        if self.stride == 2:
+            convout = subsample2(convout)
+        elif self.stride > 2:
+            raise NotImplementedError(f"Equivariance for stride {self.stride} not implemented yet")
+
+        linout = self.linear(x)
+        
+        out = 0.5 * (linout + convout)
+        out = self.activation(out)
+
+        return out
+    
+    
+class SConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, h, w, stride=1):
+        super(SConvBlock, self).__init__()
+        self.conv = SConv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular', bias=True)
+
+        tmp_conv = nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular')
+        torch.nn.init.kaiming_uniform_(tmp_conv.weight, nonlinearity='relu')
+        self.conv._set_u_from_weight(tmp_conv.weight)
+
+        self.conv.bias.data.zero_()
+        self.stride = stride
+        self.conv.reduce(0.5)
+        self.activation = F.relu
+        
+    def forward(self, x):
         convout  = self.conv(x)
+
+        if self.stride == 2:
+            convout = subsample2(convout)
+        elif self.stride > 2:
+            raise NotImplementedError(f"Equivariance for stride {self.stride} not implemented yet")
+
         return self.activation(convout)
 
-class RPP_D_Conv(nn.Module):
-    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
-        super(RPP_D_Conv, self).__init__()
-        modules = [BNLinearConvBlock(in_ch, alpha, h=h, w=w, stride=1),
-                   BNLinearConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
-                   BNLinearConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
-                   BNLinearConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
-                   BNLinearConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
-                   BNLinearConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                   BNLinearConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                   BNLinearConvBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
-        self.conv_net = nn.Sequential(*modules)
-        
-        self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
-        
-    def forward(self, x):
-        out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
-    
+class SLinearBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, h, w, stride=1):
+        super(SLinearBlock, self).__init__()
+        self.linear = SLinear2d(in_ch, out_ch, (h, w), (h//stride, w//stride), bias=False)
 
-class D_Conv(nn.Module):
-    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
-        super(D_Conv, self).__init__()
-        modules = [BNConvBlock(in_ch, alpha, h=h, w=w, stride=1),
-                   BNConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
-                   BNConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
-                   BNConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
-                   BNConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
-                   BNConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                   BNConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                   BNConvBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
-        self.conv_net = nn.Sequential(*modules)
-        
+        self.linear.reduce(0.5)
+        self.linear.lin_U.bias.data.zero_()
+        # self.linear.lin_V.bias.data.zero_()
+
+        self.stride=stride
+        self.out_ch = out_ch
+        self.h = h
+        self.w = w
         self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
         
     def forward(self, x):
-        out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
-    
-    
+        print('--')
+        print('X:', x.mean(), x.std())
+        linout = self.linear(x)
+        out = linout
+        print('Z:', out.mean(), out.std())
+        out = self.activation(out)
+        print('Y:', out.mean(), out.std())
+
+        return out
+
+class SLinearConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, h, w, stride=1):
+        super(SLinearConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1, padding_mode='circular')
+        torch.nn.init.kaiming_uniform_(self.conv.weight, nonlinearity='relu')
+        self.conv.bias.data.zero_()
+        self.stride = stride
+        self.linear = SLinear2d(in_ch, out_ch, (h, w), (h//stride, w//stride))
+
+        self.linear.reduce(0.5)
+        self.linear.lin_U.bias.data.zero_()
+        # self.linear.lin_V.bias.data.zero_()
+
+        self.h = h
+        self.w = w
+        self.activation = F.relu
+        
+    def forward(self, x):
+        convout = self.conv(x)
+
+        if self.stride == 2:
+            convout = subsample2(convout)
+        elif self.stride > 2:
+            raise NotImplementedError(f"Equivariance for stride {self.stride} not implemented yet")
+
+        linout = self.linear(x)
+        
+        out = 0.5 * (linout + convout)
+        out = self.activation(out)
+
+        return out
+
+
+#### NETWORKS: 
+
 class D_FC(nn.Module):
     def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
         super(D_FC, self).__init__()
@@ -256,109 +231,225 @@ class D_FC(nn.Module):
                   BNLinearBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
                   BNLinearBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
                   BNLinearBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                  BNLinearBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                  BNLinearBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
+                  BNLinearBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                  BNLinearBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
+                  #BNLinearBlock(16*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
         self.conv_net = nn.Sequential(*modules)
         
         self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
-        
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
     def forward(self, x):
         out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
-
-class RPP_D_Conv_B(nn.Module):
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
+    
+class D_Conv(nn.Module):
     def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
-        super(RPP_D_Conv_B, self).__init__()
-        modules = [NNLinearConvBlock(in_ch, alpha, h=h, w=w, stride=1),
-                   NNLinearConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
-                   NNLinearConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
-                   NNLinearConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
-                   NNLinearConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
-                   NNLinearConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                   NNLinearConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                   NNLinearConvBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
+        super(D_Conv, self).__init__()
+        modules = [BNConvBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   BNConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   BNConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   BNConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   BNConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   BNConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   BNConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   BNConvBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
+                   #BNConvBlock(16*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2),
         self.conv_net = nn.Sequential(*modules)
         
         self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
-        
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
     def forward(self, x):
         out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
     
-
-class D_Conv_B(nn.Module):
+class D_RPP(nn.Module):
     def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
-        super(D_Conv_B, self).__init__()
-        modules = [NNConvBlock(in_ch, alpha, h=h, w=w, stride=1),
-                   NNConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
-                   NNConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
-                   NNConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
-                   NNConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
-                   NNConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                   NNConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                   NNConvBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
+        super(D_RPP, self).__init__()
+        modules = [BNLinearConvBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   BNLinearConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   BNLinearConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   BNLinearConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   BNLinearConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   BNLinearConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   BNLinearConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   BNLinearConvBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
         self.conv_net = nn.Sequential(*modules)
         
         self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
-        
+        self.final1 = nn.Linear(16*alpha, 64*num_classes)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
     def forward(self, x):
         out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
-    
-    
-class D_FC_B(nn.Module):
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
+
+class F_FC(nn.Module):
     def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
-        super(D_FC_B, self).__init__()
-        modules = [NNLinearBlock(in_ch, alpha, h=h, w=w, stride=1),
-                   NNLinearBlock(alpha, 2*alpha, h=h, w=w, stride=2),
-                   NNLinearBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
-                   NNLinearBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
-                   NNLinearBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
-                   NNLinearBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
-                   NNLinearBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=1),
-                   NNLinearBlock(8*alpha, 16*alpha,h=int(h/8), w=int(w/8), stride=2)]
+        super(F_FC, self).__init__()
+        modules = [FLinearBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   FLinearBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   FLinearBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   FLinearBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   FLinearBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   FLinearBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   FLinearBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   FLinearBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
+                   #FLinearBlock(16*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2),
+        self.conv_net = nn.Sequential(*modules)
+
+        self.activation = F.relu
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
+    def forward(self, x):
+        out = self.conv_net(x)
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
+    
+
+class F_RPP(nn.Module):
+    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
+        super(F_RPP, self).__init__()
+        modules = [FLinearConvBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   FLinearConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   FLinearConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   FLinearConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   FLinearConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   FLinearConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   FLinearConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   FLinearConvBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2),]
         self.conv_net = nn.Sequential(*modules)
         
         self.activation = F.relu
-        self.linear1 = nn.Linear(16*alpha * int(h/16) * int(w/16), 64*alpha)
-        self.linear2 = nn.Linear(64*alpha, num_classes)
-        
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
     def forward(self, x):
         out = self.conv_net(x)
-        out = self.activation(self.linear1(out.view(x.shape[0], -1)))
-        return self.linear2(out)
-    
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
     
 
-def RPPConv_L2(mdl, conv_wd, basic_wd):
-    conv_l2 = 0.
-    basic_l2 = 0.
-    for block in mdl.conv_net:
-        if hasattr(block, 'conv'):
-            conv_l2 += sum([p.pow(2).sum() for p in block.conv.parameters()])
-        if hasattr(block, 'linear'):
-            basic_l2 += sum([p.pow(2).sum() for p in block.linear.parameters()])
-        
-    return conv_wd*conv_l2  + basic_wd*basic_l2
+class S_Conv(nn.Module):
+    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
+        super(S_Conv, self).__init__()
+        modules = [SConvBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   SConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   SConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   SConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   SConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   SConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   SConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   SConvBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
+                   #SConvBlock(16*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
 
-def RPPConv_L1(mdl, conv_wd, basic_wd):
-    conv_l1 = 0.
-    basic_l1 = 0.
-    for block in mdl.conv_net:
-        if hasattr(block, 'conv'):
-            conv_l1 += sum([p.abs().sum() for p in block.conv.parameters()])
-        if hasattr(block, 'linear'):
-            basic_l1 += sum([p.abs().sum() for p in block.linear.parameters()])
+        self.conv_net = nn.Sequential(*modules)
         
-    return conv_wd*conv_l1  + basic_wd*basic_l1
+        self.activation = F.relu
+        self.final1 = nn.Linear(16*alpha, 64*num_classes)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
+    def forward(self, x):
+        out = self.conv_net(x)
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
+
+
+class S_FC(nn.Module):
+    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
+        super(S_FC, self).__init__()
+        modules = [SLinearBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   SLinearBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   SLinearBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   SLinearBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   SLinearBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   SLinearBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   SLinearBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   SLinearBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2)]
+                   #SLinearBlock(16*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2),
+        self.conv_net = nn.Sequential(*modules)
+
+        self.activation = F.relu
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
+    def forward(self, x):
+        out = self.conv_net(x)
+        out = out.view(*out.shape[:2])
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        #exit(1)
+        return out
+    
+
+class S_RPP(nn.Module):
+    def __init__(self, in_ch=3, num_classes=10, alpha=1, h=32, w=32):
+        super(S_RPP, self).__init__()
+        modules = [SLinearConvBlock(in_ch, alpha, h=h, w=w, stride=1),
+                   SLinearConvBlock(alpha, 2*alpha, h=h, w=w, stride=2),
+                   SLinearConvBlock(2*alpha, 2*alpha, h=int(h/2), w=int(w/2), stride=1),
+                   SLinearConvBlock(2*alpha, 4*alpha, h=int(h/2), w=int(w/2), stride=2),
+                   SLinearConvBlock(4*alpha, 4*alpha, h=int(h/4), w=int(w/4), stride=1),
+                   SLinearConvBlock(4*alpha, 8*alpha, h=int(h/4), w=int(w/4), stride=2),
+                   SLinearConvBlock(8*alpha, 8*alpha, h=int(h/8), w=int(w/8), stride=2),
+                   SLinearConvBlock(8*alpha, 16*alpha,h=int(h/16), w=int(w/16), stride=2),]
+        self.conv_net = nn.Sequential(*modules)
+        
+        self.activation = F.relu
+        self.final1 = nn.Linear(16*alpha, 64*alpha)
+        self.final1.bias.data.zero_()
+        self.final2 = nn.Linear(64*alpha, num_classes)
+        self.final2.bias.data.zero_()
+
+    def forward(self, x):
+        print('--X:', x.std().item())
+        out = self.conv_net(x)
+        out = out.view(*out.shape[:2])
+        print('--Y:', out.std().item())
+        out = self.final1(out)
+        out = self.activation(out)
+        out = self.final2(out)
+        return out
+
 
 

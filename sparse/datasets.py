@@ -608,3 +608,4 @@ class ScaledCIFAR10(datasets.CIFAR10):
         self.data = self.data.clamp(xmin, xmax).numpy().astype(data_dtype)
         self.data = self.data.transpose(0, 2, 3, 1)
 
+

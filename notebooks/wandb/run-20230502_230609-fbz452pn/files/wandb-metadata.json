@@ -1,0 +1,204 @@
+{
+    "os": "Linux-5.19.0-38-generic-x86_64-with-glibc2.35",
+    "python": "3.10.9",
+    "heartbeatAt": "2023-05-02T22:06:10.666813",
+    "startedAt": "2023-05-02T22:06:09.965005",
+    "docker": null,
+    "cuda": null,
+    "args": null,
+    "state": "running",
+    "program": "<python with no main file>",
+    "git": {
+        "remote": "git@github.com:tychovdo/laplace-sparse-convolutions.git",
+        "commit": "1e19336bcf194a9b69b828a83c78def6dd3f3382"
+    },
+    "email": "tychovdo@gmail.com",
+    "root": "/vol/bitbucket/tv21/laplace-sparse-convolutions",
+    "host": "orbitals.doc.ic.ac.uk",
+    "username": "tv21",
+    "executable": "/vol/bitbucket/tv21/anaconda3/bin/python",
+    "cpu_count": 24,
+    "cpu_count_logical": 32,
+    "cpu_freq": {
+        "current": 3.4478124999999995,
+        "min": 800.0,
+        "max": 4937.5
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3.899,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5800.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5800.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5800.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5800.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.899,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.9,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.1,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 3.099,
+            "min": 800.0,
+            "max": 4300.0
+        }
+    ],
+    "disk": {
+        "total": 53.836090087890625,
+        "used": 33.81993865966797
+    },
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 4090",
+            "memory_total": 25757220864
+        }
+    ],
+    "memory": {
+        "total": 62.58289337158203
+    }
+}

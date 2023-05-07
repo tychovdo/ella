@@ -16,10 +16,11 @@ from sparse.marglik import marglik_optimization
 from sparse.invariances import AffineLayer2d
 from sparse.utils import get_laplace_approximation, set_seed
 from sparse.models import MLP, LeNet, WideResNet, ResNet, MLPMixer, ViT
+
 from data_utils.datasets import (
     RotatedMNIST, TranslatedMNIST, ScaledMNIST, RotatedFashionMNIST, TranslatedFashionMNIST,
     ScaledFashionMNIST, RotatedCIFAR10, TranslatedCIFAR10, ScaledCIFAR10, RotatedCIFAR100,
-    TranslatedCIFAR100, ScaledCIFAR100
+    TranslatedCIFAR100, ScaledCIFAR100, QuadrantMNIST, DigitMNIST
 )
 from data_utils.utils import (
     TensorDataLoader, SubsetTensorDataLoader, GroupedSubsetTensorDataLoader, dataset_to_tensors
@@ -27,12 +28,27 @@ from data_utils.utils import (
 
 from data_utils.augmentation import CIFAR10_augment
 
-from sparse.conv import SConv2d
-from asdfghjkl.operations.sconv_aug import SConv2dAug
+from sparse.sconv2d import SConv2d
 from sparse.utils import convert_model
-from sparse.rpp_conv import RPP_D_Conv, D_Conv, D_FC
-from sparse.rpp_conv import RPP_D_Conv_B, D_Conv_B, D_FC_B
+from sparse.rpp_conv import D_RPP, D_Conv, D_FC
+from sparse.rpp_conv import F_RPP, F_FC
+from sparse.rpp_conv import S_RPP, S_Conv, S_FC
 
+# from sparse.rpp_conv_group import S_GFC 
+# from sparse.rpp_conv_group import D_GRPP 
+from sparse.rpp_conv_group import D_GConv 
+from sparse.rpp_conv_group import D_GConvFull 
+from sparse.rpp_conv_group import D_GConvGSeparable
+from sparse.rpp_conv_group import D_GConvDGSeparable
+from sparse.rpp_conv_group import D_GConvPointwise
+# from sparse.rpp_conv_group import D_GFC 
+# from sparse.rpp_conv_group import F_GRPP 
+# from sparse.rpp_conv_group import F_GFC 
+# from sparse.rpp_conv_group import S_GRPP 
+# from sparse.rpp_conv_group import S_GConv 
+# from sparse.rpp_conv_group import S_GFC 
+
+from sparse.rpp_conv_mix import Mixer1 
 
 def get_dataset(dataset, data_root, download_data, transform):
     if dataset == 'mnist':
@@ -65,6 +81,12 @@ def get_dataset(dataset, data_root, download_data, transform):
     elif dataset == 'scaled_fmnist':
         train_dataset = ScaledFashionMNIST(data_root, np.log(2), train=True, download=download_data, transform=transform)
         test_dataset = ScaledFashionMNIST(data_root, np.log(2), train=False, download=download_data, transform=transform)
+    elif dataset == 'digit_mnist':
+        train_dataset = DigitMNIST(data_root, train=True, download=download_data, transform=transform)
+        test_dataset = DigitMNIST(data_root, train=False, download=download_data, transform=transform)
+    elif dataset == 'quadrant_mnist':
+        train_dataset = QuadrantMNIST(data_root, train=True, download=download_data, transform=transform)
+        test_dataset = QuadrantMNIST(data_root, train=False, download=download_data, transform=transform)
     elif dataset == 'cifar10':
         train_dataset = RotatedCIFAR10(data_root, 0, train=True, download=download_data, transform=transform)
         test_dataset = RotatedCIFAR10(data_root, 0, train=False, download=download_data, transform=transform)
@@ -97,6 +119,7 @@ def get_dataset(dataset, data_root, download_data, transform):
         test_dataset = ScaledCIFAR100(data_root, np.log(2), train=False, download=download_data, transform=transform)
     else:
         raise NotImplementedError(f'Unknown dataset: {dataset}')
+
     return train_dataset, test_dataset
 
 
@@ -105,11 +128,13 @@ def main(
     subset_size, n_samples_aug, softplus, init_aug, lr, lr_min, lr_hyp, lr_hyp_min, lr_aug, lr_aug_min, grouped_loader,
     prior_prec_init, n_epochs_burnin, marglik_frequency, n_hypersteps, n_hypersteps_prior, random_flip, sam, sam_with_prior,
     last_logit_constant, save, device, download_data, data_root, use_wandb, independent_outputs, kron_jac, single_output,
-    data_augmentation, data_augmentation_marglik, sparse
+    data_augmentation, data_augmentation_marglik, sparse, curvature, track_kron_la, scheduler, alpha, shared_uv, omega_hyper
 ):
     # dataset-specific static transforms (preprocessing)
     if 'mnist' in dataset:
-        transform = transforms.ToTensor()
+        mean = 0.1307
+        std = 0.3081
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
     elif 'cifar' in dataset:
         mean = [x / 255 for x in [125.3, 123.0, 113.9]]
         std = [x / 255 for x in [63.0, 62.1, 66.7]]
@@ -122,6 +147,8 @@ def main(
     # dataset-specific number of classes
     if 'cifar100' in dataset:
         n_classes = 100
+    elif 'quadrant' in dataset:
+        n_classes = 40
     else:
         n_classes = 10
 
@@ -183,7 +210,7 @@ def main(
     # model
     optimizer = 'SGD'
     prior_structure = 'layerwise'
-    if 'mnist' in dataset:
+    if ('mnist' in dataset) and (dataset not in ('digit_mnist', 'quadrant_mnist')):
         if model == 'mlp':
             model = MLP(28*28, width=1000, depth=1, output_size=n_classes, fixup=False, activation='tanh',
                         augmented=optimize_aug, last_logit_constant=last_logit_constant)
@@ -199,15 +226,20 @@ def main(
                         num_classes=n_classes)
         else:
             raise ValueError('Unavailable model for (f)mnist')
-    elif 'cifar10' in dataset:
+    else:
+        if 'cifar10' in dataset:
+            in_channels = 3
+        elif dataset in ('digit_mnist', 'quadrant_mnist'):
+            in_channels = 1
+
         if model == 'cnn':
-            model = LeNet(in_channels=3, n_out=n_classes, activation='relu', n_pixels=32, augmented=optimize_aug,
+            model = LeNet(in_channels=in_channels, n_out=n_classes, activation='relu', n_pixels=32, augmented=optimize_aug,
                           last_logit_constant=last_logit_constant)
         elif model == 'resnet_8_8':
-            model = ResNet(depth=8, in_planes=8, in_channels=3, num_classes=n_classes, augmented=optimize_aug,
+            model = ResNet(depth=8, in_planes=8, in_channels=in_channels, num_classes=n_classes, augmented=optimize_aug,
                            last_logit_constant=last_logit_constant)
         elif model == 'resnet':
-            model = ResNet(depth=14, in_planes=16, in_channels=3, num_classes=n_classes, augmented=optimize_aug,
+            model = ResNet(depth=14, in_planes=16, in_channels=in_channels, num_classes=n_classes, augmented=optimize_aug,
                            last_logit_constant=last_logit_constant)
         elif model == 'wrn':
             model = WideResNet(augmented=optimize_aug, last_logit_constant=last_logit_constant,
@@ -221,33 +253,79 @@ def main(
                         num_classes=n_classes)
         elif model == 'd_conv':
             optimizer = 'SGD'
-            model = D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = D_Conv(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
         elif model == 'd_fc':
             optimizer = 'SGD'
-            model = D_FC(in_ch=3, num_classes=n_classes, alpha=10) 
-        elif model == 'rpp_d_conv':
+            model = D_FC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_rpp':
             optimizer = 'SGD'
-            model = RPP_D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
-        elif model == 'd_conv_b':
+            model = D_RPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'f_fc':
             optimizer = 'SGD'
-            model = D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
-        elif model == 'd_fc_b':
+            model = F_FC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'f_rpp':
             optimizer = 'SGD'
-            model = D_FC_B(in_ch=3, num_classes=n_classes, alpha=10) 
-        elif model == 'rpp_d_conv_b':
+            model = F_RPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_fc':
             optimizer = 'SGD'
-            model = RPP_D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = S_FC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_conv':
+            optimizer = 'SGD'
+            model = S_Conv(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_rpp':
+            optimizer = 'SGD'
+            model = S_RPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gconv':
+            optimizer = 'SGD'
+            model = D_GConv(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gconv_full':
+            optimizer = 'SGD'
+            model = D_GConvFull(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gconv_gseparable':
+            optimizer = 'SGD'
+            model = D_GConvGSeparable(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gconv_dgseparable':
+            optimizer = 'SGD'
+            model = D_GConvDGSeparable(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gconv_pointwise':
+            optimizer = 'SGD'
+            model = D_GConvPointwise(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_gfc':
+            optimizer = 'SGD'
+            model = D_GFC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'd_grpp':
+            optimizer = 'SGD'
+            model = D_GRPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'f_gfc':
+            optimizer = 'SGD'
+            model = F_GFC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'f_grpp':
+            optimizer = 'SGD'
+            model = F_GRPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_gfc':
+            optimizer = 'SGD'
+            model = S_GFC(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_gconv':
+            optimizer = 'SGD'
+            model = S_GConv(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 's_grpp':
+            optimizer = 'SGD'
+            model = S_GRPP(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
+        elif model == 'mixer1':
+            optimizer = 'SGD'
+            model = Mixer1(in_ch=in_channels, num_classes=n_classes, alpha=alpha) 
         else:
             raise ValueError('Unavailable model for cifar')
+        # optimizer = 'Adam'
 
-    
     if False: # HACKY NEW INIT
         for name, param in model.named_parameters():
             with torch.no_grad():
                 if 'bias' in name:
                     param.data.zero_()
                 elif 'weight' in name:
-                    torch.nn.init.xavier_uniform(param)
+                    param.data = param.data * 0.0
+                    #torch.nn.init.xavier_uniform_(param, gain=1.4142)
                 else:
                     raise NotImplementedError(f"Unknown initialisation for param with name '{name}'.")
 
@@ -261,6 +339,7 @@ def main(
                                 conv_class=SConv2dAug,
                                 kernel_type='rbf',
                                 solver='solve', noise_std=0.001)
+            raise NotImplementedError(f"SLinearAug not implemented yet...")
         else:
             convert_model(model,
                                 free_anchor_loc=False,
@@ -286,10 +365,11 @@ def main(
         sam=sam, sam_with_prior=sam_with_prior,
         n_hypersteps=n_hypersteps, marglik_frequency=marglik_frequency, laplace=laplace,
         prior_structure=prior_structure, backend=backend, n_epochs_burnin=n_epochs_burnin,
-        method=method, augmenter=augmenter_valid, lr_min=lr_min, scheduler='cos', optimizer=optimizer,
+        method=method, augmenter=augmenter_valid, lr_min=lr_min, scheduler=scheduler, optimizer=optimizer,
         n_hypersteps_prior=n_hypersteps_prior, temperature=temperature, lr_aug_min=lr_aug_min,
         prior_prec_init=prior_prec_init, stochastic_grad=stochastic_grad, use_wandb=use_wandb,
-        track_kron_la=True, independent=independent_outputs, kron_jac=kron_jac, single_output=single_output
+        track_kron_la=track_kron_la, independent=independent_outputs, kron_jac=kron_jac, single_output=single_output,
+        curvature=curvature, shared_uv=shared_uv, omega_hyper=omega_hyper
     )
 
     prior_prec = la.prior_precision.mean().item()
@@ -341,9 +421,10 @@ if __name__ == '__main__':
         'mnist', 'mnist_r90', 'mnist_r180', 'translated_mnist', 'scaled_mnist', 'scaled_mnist2',
         'fmnist', 'fmnist_r90', 'fmnist_r180', 'translated_fmnist', 'scaled_fmnist', 'scaled_fmnist2',
         'cifar10', 'cifar10_r90', 'cifar10_r180', 'translated_cifar10', 'scaled_cifar10',
-        'cifar100', 'cifar100_r90', 'cifar100_r180', 'translated_cifar100', 'scaled_cifar100'
+        'cifar100', 'cifar100_r90', 'cifar100_r180', 'translated_cifar100', 'scaled_cifar100',
+        'digit_mnist', 'quadrant_mnist'
     ])
-    parser.add_argument('--model', default='mlp', choices=['mlp', 'cnn', 'resnet', 'resnet_8_8', 'wrn', 'mlpmixer', 'vit', 'd_conv', 'd_fc', 'rpp_d_conv', 'd_conv_b', 'd_fc_b', 'rpp_d_conv_b'])
+    parser.add_argument('--model', default='mlp', choices=['mlp', 'cnn', 'resnet', 'resnet_8_8', 'wrn', 'mlpmixer', 'vit', 'd_conv', 'd_fc', 'd_rpp', 'f_fc', 'f_rpp', 's_fc', 's_conv', 's_rpp', 'd_conv_strict', 'd_fc_strict', 'd_rpp_strict', 'f_fc_strict', 'f_rpp_strict', 's_fc_strict', 's_conv_strict', 's_rpp_strict', 'd_gconv', 'd_gconv_full', 'd_gconv_gseparable', 'd_gconv_dgseparable', 'd_gconv_pointwise', 'd_gfc', 'd_grpp', 'f_gfc', 'f_grpp', 's_gfc', 's_gconv', 's_grpp', 'mixer1'])
     parser.add_argument('--n_epochs', default=500, type=int)
     parser.add_argument('--n_epochs_burnin', default=10, type=int)
     parser.add_argument('--independent_outputs', default=False, action=argparse.BooleanOptionalAction,
@@ -385,6 +466,12 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', default='data')
     parser.add_argument('--use_wandb', default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument('--config', nargs='+')
+    parser.add_argument('--curvature', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--track_kron_la', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--scheduler', default='cos')
+    parser.add_argument('--alpha', default=10, type=int)
+    parser.add_argument('--shared_uv', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--omega_hyper', default=False, action=argparse.BooleanOptionalAction)
     set_defaults_with_yaml_config(parser, sys.argv)
     args = vars(parser.parse_args())
     args.pop('config')

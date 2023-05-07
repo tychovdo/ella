@@ -27,7 +27,7 @@ class Regression(nn.Module):
             self.register_buffer('Z_idt', torch.eye(len(Z), device=Z.device))
 
         if noise_std is not None:
-            if learn_noise:
+            if self.learn_noise:
                 self.noise_std = nn.Parameter(torch.full((1,), noise_std))
             else:
                 self.noise_std = noise_std

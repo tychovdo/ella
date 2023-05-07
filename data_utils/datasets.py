@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import datasets
+from torchvision import transforms
 
 LOG2 = np.log(2.0)
 
@@ -844,3 +845,108 @@ class ScaledCIFAR100(datasets.CIFAR100):
         self.data = F.grid_sample(self.data.float(), grids, align_corners=False, mode=mode)
         self.data = self.data.clamp(xmin, xmax).numpy().astype(data_dtype)
         self.data = self.data.transpose(0, 2, 3, 1)
+
+
+class QuadrantMNIST(datasets.MNIST):
+    """ MNIST where images are placed in random quadrant using fixed random seed """
+
+    def __init__(self, root: str, shape = (32, 32),
+                 train: bool = True, transform: Union[Callable, type(None)] = None,
+                 target_transform: Union[Callable, type(None)] = None, download: bool = False):
+        super().__init__(root, train, transform, target_transform, download)
+        """
+        Args:
+            root (string): Root directory of dataset where ``MNIST/processed/training.pt``
+                and  ``MNIST/processed/test.pt`` exist.
+            train (bool, optional): If True, creates dataset from ``training.pt``,
+                otherwise from ``test.pt``.
+            download (bool, optional): If true, downloads the dataset from the internet and
+                puts it in root directory. If dataset is already downloaded, it is not
+                downloaded again.
+            transform (callable, optional): A function/transform that  takes in an PIL image
+                and returns a transformed version. E.g, ``transforms.RandomCrop``
+            target_transform (callable, optional): A function/transform that takes in the
+                target and transforms it.
+                same arguments as torchvision.see arguments of torchvision.dataset.MNIST)
+        """
+        self.classes = [f"({x}, upper left)" for x in range(10)] + \
+                       [f"({x}, upper right)" for x in range(10)] + \
+                       [f"({x}, lower left)" for x in range(10)] + \
+                       [f"({x}, lower right)" for x in range(10)]
+
+        N, H, W = self.data.shape
+        
+        torch.manual_seed(1000 + int(train))        
+        quadrants = torch.randint(0, 4, (N,))
+        
+        new_targets = self.targets + 10 * quadrants
+        
+        new_data = torch.zeros((N, H * 2, W * 2), dtype=self.data.dtype)
+        
+        for i in range(N):
+            quadrant = quadrants[i]
+            
+            dx = 28 if quadrant in (1, 3) else 0 # left/right
+            dy = 28 if quadrant in (2, 3) else 0 # upper/lower
+            
+            new_data[i, dy:dy+H, dx:dx+W] = self.data[i]
+            
+        old_dtype = new_data.dtype
+        
+        new_data = transforms.Resize(shape, antialias=False)(new_data)
+        
+        self.data = new_data
+        self.targets = new_targets
+
+
+class DigitMNIST(datasets.MNIST):
+    """ MNIST where images are placed in random quadrant using fixed random seed """
+
+    def __init__(self, root: str, shape = (32, 32),
+                 train: bool = True, transform: Union[Callable, type(None)] = None,
+                 target_transform: Union[Callable, type(None)] = None, download: bool = False):
+        super().__init__(root, train, transform, target_transform, download)
+        """
+        Args:
+            root (string): Root directory of dataset where ``MNIST/processed/training.pt``
+                and  ``MNIST/processed/test.pt`` exist.
+            train (bool, optional): If True, creates dataset from ``training.pt``,
+                otherwise from ``test.pt``.
+            download (bool, optional): If true, downloads the dataset from the internet and
+                puts it in root directory. If dataset is already downloaded, it is not
+                downloaded again.
+            transform (callable, optional): A function/transform that  takes in an PIL image
+                and returns a transformed version. E.g, ``transforms.RandomCrop``
+            target_transform (callable, optional): A function/transform that takes in the
+                target and transforms it.
+                same arguments as torchvision.see arguments of torchvision.dataset.MNIST)
+        """
+        self.classes = [f"({x}, upper left)" for x in range(10)] + \
+                       [f"({x}, upper right)" for x in range(10)] + \
+                       [f"({x}, lower left)" for x in range(10)] + \
+                       [f"({x}, lower right)" for x in range(10)]
+
+        N, H, W = self.data.shape
+        
+        torch.manual_seed(1000 + int(train))        
+        quadrants = torch.randint(0, 4, (N,))
+        
+        new_data = torch.zeros((N, H * 2, W * 2), dtype=self.data.dtype)
+        
+        for i in range(N):
+            quadrant = quadrants[i]
+            
+            dx = 28 if quadrant in (1, 3) else 0 # left/right
+            dy = 28 if quadrant in (2, 3) else 0 # upper/lower
+            
+            new_data[i, dy:dy+H, dx:dx+W] = self.data[i]
+            
+        old_dtype = new_data.dtype
+        
+        new_data = transforms.Resize(shape, antialias=False)(new_data)
+        
+        self.data = new_data
+
+
+
+

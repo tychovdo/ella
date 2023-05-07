@@ -5,17 +5,20 @@ import numpy as np
 import torch
 from torch.nn.utils.convert_parameters import vector_to_parameters
 from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import ExponentialLR, CosineAnnealingLR
+from torch.optim.lr_scheduler import ExponentialLR, CosineAnnealingLR, CosineAnnealingWarmRestarts, MultiStepLR, LinearLR
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn.utils import parameters_to_vector
+# parameters_to_vector = lambda params: torch.cat([x.reshape(-1) for x in params])
+
 import wandb
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 from laplace import KronLaplace, FunctionalLaplace
 from laplace.curvature import AsdlGGN
 
 from sparse.sam import SAM
 from sparse.utils import (
-    wandb_log_invariance, wandb_log_prior, wandb_log_parameter_norm
+    wandb_log_invariance, wandb_log_prior, wandb_log_parameter_norm, wandb_log_effective_dimensionality
 )
 
 GB_FACTOR = 1024 ** 3
@@ -75,6 +78,32 @@ def get_scheduler(scheduler, optimizer, train_loader, n_epochs, lr, lr_min):
         return ExponentialLR(optimizer, gamma=gamma)
     elif scheduler == 'cos':
         return CosineAnnealingLR(optimizer, n_steps, eta_min=lr_min)
+    elif scheduler == 'multistep_1k':
+        return MultiStepLR(optimizer, milestones=[500, 1000, 2000, 3000], gamma=0.1)
+    elif scheduler == 'linear':
+        return LinearLR(optimizer, start_factor=1.0, end_factor=lr_min, total_iters=n_steps)
+    elif scheduler == 'cosrestarts':
+        return CosineAnnealingWarmRestarts(optimizer, n_steps//40, eta_min=lr_min)
+    elif scheduler == 'cosrestartswarmup1':
+        return CosineAnnealingWarmupRestarts(optimizer,
+                                             first_cycle_steps=n_steps//4, cycle_mult=1.0, max_lr=lr,
+                                             min_lr=lr_min, warmup_steps=n_steps//20, gamma=1.0)
+    elif scheduler == 'cosrestartswarmup2':
+        return CosineAnnealingWarmupRestarts(optimizer,
+                                             first_cycle_steps=n_steps//10, cycle_mult=1.0, max_lr=lr,
+                                             min_lr=lr_min, warmup_steps=n_steps//50, gamma=0.5)
+    elif scheduler == 'cosrestartswarmup3':
+        return CosineAnnealingWarmupRestarts(optimizer,
+                                             first_cycle_steps=n_steps//4, cycle_mult=1.0, max_lr=lr,
+                                             min_lr=lr_min, warmup_steps=0, gamma=0.5)
+    elif scheduler == 'cosrestartswarmup4':
+        return CosineAnnealingWarmupRestarts(optimizer,
+                                             first_cycle_steps=n_steps//4, cycle_mult=1.0, max_lr=lr,
+                                             min_lr=lr_min, warmup_steps=100, gamma=1.0)
+    elif scheduler == 'cosrestartswarmup5':
+        return CosineAnnealingWarmupRestarts(optimizer,
+                                             first_cycle_steps=n_steps//10, cycle_mult=1.0, max_lr=lr,
+                                             min_lr=lr_min, warmup_steps=0, gamma=0.1)
     else:
         raise ValueError(f'Invalid scheduler {scheduler}')
 
@@ -141,7 +170,10 @@ def marglik_optimization(model,
                          sam_with_prior=False,
                          track_kron_la=False,
                          track_bound=False,
-                         use_wandb=False):
+                         use_wandb=False,
+                         curvature=False,
+                         shared_uv=False,
+                         omega_hyper=False):
     """Runs marglik optimization training for a given model and training dataloader.
 
     Parameters
@@ -225,6 +257,7 @@ def marglik_optimization(model,
 
     # differentiable hyperparameters
     hyperparameters = list()
+    
     # prior precision
     log_prior_prec = get_prior_hyperparams(prior_prec_init, prior_structure, H, P, device)
     hyperparameters.append(log_prior_prec)
@@ -242,11 +275,16 @@ def marglik_optimization(model,
 
     # set up model optimizer and scheduler
     optimizer = get_model_optimizer(optimizer, model, lr, sam=sam)
-    scheduler = get_scheduler(scheduler, optimizer.base_optimizer if sam else optimizer,
+    param_scheduler = get_scheduler(scheduler, optimizer.base_optimizer if sam else optimizer,
                               train_loader, n_epochs, lr, lr_min)
 
     n_steps = ((n_epochs + 1 - n_epochs_burnin) // marglik_frequency) * n_hypersteps_prior
-    hyper_optimizer = Adam(hyperparameters, lr=lr_hyp)
+
+    if curvature:
+        hyper_optimizer = Adam(hyperparameters + list(model.parameters()), lr=lr_hyp)
+    else:
+        hyper_optimizer = Adam(hyperparameters, lr=lr_hyp)
+
     hyper_scheduler = CosineAnnealingLR(hyper_optimizer, n_steps, eta_min=lr_hyp_min)
     if optimize_aug:
         logging.info('MARGLIK: optimize augmentation.')
@@ -291,8 +329,8 @@ def marglik_optimization(model,
                 if sam_with_prior:
                     theta = parameters_to_vector(model.parameters())
                     loss += (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+
+                loss.backward()
                 optimizer.first_step(zero_grad=True)
                 # 2. step
                 if method == 'lila':
@@ -301,14 +339,13 @@ def marglik_optimization(model,
                     f = model(X)
                 theta = parameters_to_vector(model.parameters())
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+                loss.backward()
                 optimizer.second_step(zero_grad=True)
             else:
                 theta = parameters_to_vector(model.parameters())
+
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+                loss.backward()
                 optimizer.step()
 
             epoch_loss += loss.cpu().item() / len(train_loader)
@@ -317,13 +354,23 @@ def marglik_optimization(model,
                 epoch_perf += (f.detach() - y).square().sum() / N
             else:
                 epoch_perf += torch.sum(torch.argmax(f.detach(), dim=-1) == y).item() / N
-            scheduler.step()
+
+            # if scheduler == 'cosrestarts':
+            #     if epoch % 100 == 0:
+            #         print('decrease')
+            #         param_scheduler.base_lrs[0] = param_scheduler.base_lrs[0] * 0.5
+            #         print(' base lrs: ', param_scheduler.base_lrs)
+            param_scheduler.step()
 
         losses.append(epoch_loss)
         logging.info('MAP memory allocated: ' + str(torch.cuda.max_memory_allocated(loss.device)/GB_FACTOR) + ' Gb.')
         logging.info(f'MARGLIK[epoch={epoch}]: train. perf={epoch_perf*100:.2f}%; loss={epoch_loss:.5f}; nll={epoch_nll:.5f}')
         optimizer.zero_grad(set_to_none=True)
-        llr = scheduler.get_last_lr()[0]
+
+        if 'warmup' in scheduler:
+            llr = param_scheduler.get_lr()
+        else:
+            llr = param_scheduler.get_last_lr()[0]
         epoch_log.update({'train/loss': epoch_loss, 'train/nll': epoch_nll, 'train/perf': epoch_perf, 'train/lr': llr})
         if use_wandb and ((epoch % 5) == 0):
             wandb_log_parameter_norm(model)
@@ -337,7 +384,7 @@ def marglik_optimization(model,
                 epoch_log.update({'valid/perf': val_perf, 'valid/nll': val_nll})
 
         # track kfac laplace marglik
-        if track_kron_la and (epoch % 10 == 0):
+        if track_kron_la and (epoch % 20 == 0):
             sigma_noise = 1 if likelihood == 'classification' else torch.exp(log_sigma_noise.detach())
             prior_prec = torch.exp(log_prior_prec.detach())
             lap = KronLaplace(model, likelihood, sigma_noise=sigma_noise, prior_precision=prior_prec,
@@ -387,8 +434,26 @@ def marglik_optimization(model,
                 marglik = -lap.log_marginal_likelihood(prior_prec, sigma_noise) / N
             else:  # fit with updated hparams
                 marglik = -lap.log_marginal_likelihood() / N
-            with torch.autograd.detect_anomaly(check_nan=True):
-                marglik.backward()
+            marglik.backward()
+
+            if shared_uv:
+                params = list(model.parameters())
+                names = [name for name, _ in model.named_parameters()]
+                for i, name_self in enumerate(names):
+                    if 'lin_U' in name_self:
+                        name_other = name_self.replace('lin_U', 'lin_V')
+                        j = names.index(name_other)
+                        
+                        i_weight = len(params[i].view(-1))
+                        j_weight = len(params[j].view(-1))
+                        i_weight = i_weight / (i_weight + j_weight)
+                        j_weight = j_weight / (i_weight + j_weight)
+
+                        mean_grad = i_weight * log_prior_prec.grad[i] + j_weight * log_prior_prec.grad[j]
+
+                        log_prior_prec.grad.data[i] = mean_grad
+                        log_prior_prec.grad.data[j] = mean_grad
+
             margliks_local.append(marglik.item())
             if i < n_hypersteps_prior:
                 hyper_optimizer.step()
@@ -421,6 +486,7 @@ def marglik_optimization(model,
 
         if use_wandb:
             wandb_log_prior(torch.exp(log_prior_prec.detach()), prior_structure, model)
+            wandb_log_effective_dimensionality(lap.effective_dimensionality, prior_structure, model)
         if likelihood == 'regression':
             epoch_log['hyperparams/sigma_noise'] = torch.exp(log_sigma_noise.detach()).cpu().item()
         epoch_log['train/marglik'] = marglik
@@ -442,11 +508,9 @@ def marglik_optimization(model,
                 # curv closure creates gradient already, need to zero
                 aug_optimizer.zero_grad()
                 # compute grad wrt. neg. log-lik
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
+                (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
                 # compute grad wrt. log det = 0.5 vec(P_inv) @ (grad-vec H)
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
+                (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
                 aug_grad = (aug_grad + gradient_to_vector(augmenter.parameters()).data.clone())
 
             lap.backend.differentiable = False
