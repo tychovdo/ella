@@ -329,7 +329,6 @@ def marglik_optimization(model,
                 if sam_with_prior:
                     theta = parameters_to_vector(model.parameters())
                     loss += (0.5 * (delta * theta) @ theta) / N / crit_factor
-
                 loss.backward()
                 optimizer.first_step(zero_grad=True)
                 # 2. step
