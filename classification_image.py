@@ -105,7 +105,7 @@ def main(
     subset_size, n_samples_aug, softplus, init_aug, lr, lr_min, lr_hyp, lr_hyp_min, lr_aug, lr_aug_min, grouped_loader,
     prior_prec_init, n_epochs_burnin, marglik_frequency, n_hypersteps, n_hypersteps_prior, random_flip, sam, sam_with_prior,
     last_logit_constant, save, device, download_data, data_root, use_wandb, independent_outputs, kron_jac, single_output,
-    data_augmentation, data_augmentation_marglik, sparse
+    data_augmentation, data_augmentation_marglik, sparse, alpha
 ):
     # dataset-specific static transforms (preprocessing)
     if 'mnist' in dataset:
@@ -221,22 +221,22 @@ def main(
                         num_classes=n_classes)
         elif model == 'd_conv':
             optimizer = 'SGD'
-            model = D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = D_Conv(in_ch=3, num_classes=n_classes, alpha=alpha) 
         elif model == 'd_fc':
             optimizer = 'SGD'
-            model = D_FC(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = D_FC(in_ch=3, num_classes=n_classes, alpha=alpha) 
         elif model == 'rpp_d_conv':
             optimizer = 'SGD'
-            model = RPP_D_Conv(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = RPP_D_Conv(in_ch=3, num_classes=n_classes, alpha=alpha) 
         elif model == 'd_conv_b':
             optimizer = 'SGD'
-            model = D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = D_Conv_B(in_ch=3, num_classes=n_classes, alpha=alpha) 
         elif model == 'd_fc_b':
             optimizer = 'SGD'
-            model = D_FC_B(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = D_FC_B(in_ch=3, num_classes=n_classes, alpha=alpha) 
         elif model == 'rpp_d_conv_b':
             optimizer = 'SGD'
-            model = RPP_D_Conv_B(in_ch=3, num_classes=n_classes, alpha=10) 
+            model = RPP_D_Conv_B(in_ch=3, num_classes=n_classes, alpha=alpha) 
         else:
             raise ValueError('Unavailable model for cifar')
 
@@ -385,6 +385,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', default='data')
     parser.add_argument('--use_wandb', default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument('--config', nargs='+')
+    parser.add_argument('--alpha', default=10, type=int)
     set_defaults_with_yaml_config(parser, sys.argv)
     args = vars(parser.parse_args())
     args.pop('config')

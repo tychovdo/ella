@@ -291,8 +291,7 @@ def marglik_optimization(model,
                 if sam_with_prior:
                     theta = parameters_to_vector(model.parameters())
                     loss += (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+                loss.backward()
                 optimizer.first_step(zero_grad=True)
                 # 2. step
                 if method == 'lila':
@@ -301,14 +300,12 @@ def marglik_optimization(model,
                     f = model(X)
                 theta = parameters_to_vector(model.parameters())
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+                loss.backward()
                 optimizer.second_step(zero_grad=True)
             else:
                 theta = parameters_to_vector(model.parameters())
                 loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    loss.backward()
+                loss.backward()
                 optimizer.step()
 
             epoch_loss += loss.cpu().item() / len(train_loader)
@@ -387,8 +384,7 @@ def marglik_optimization(model,
                 marglik = -lap.log_marginal_likelihood(prior_prec, sigma_noise) / N
             else:  # fit with updated hparams
                 marglik = -lap.log_marginal_likelihood() / N
-            with torch.autograd.detect_anomaly(check_nan=True):
-                marglik.backward()
+            marglik.backward()
             margliks_local.append(marglik.item())
             if i < n_hypersteps_prior:
                 hyper_optimizer.step()
@@ -442,11 +438,9 @@ def marglik_optimization(model,
                 # curv closure creates gradient already, need to zero
                 aug_optimizer.zero_grad()
                 # compute grad wrt. neg. log-lik
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
+                (- lap.log_likelihood).backward(inputs=list(augmenter.parameters()), retain_graph=True)
                 # compute grad wrt. log det = 0.5 vec(P_inv) @ (grad-vec H)
-                with torch.autograd.detect_anomaly(check_nan=True):
-                    (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
+                (0.5 * H_batch.flatten()).backward(gradient=hess_inv, inputs=list(augmenter.parameters()))
                 aug_grad = (aug_grad + gradient_to_vector(augmenter.parameters()).data.clone())
 
             lap.backend.differentiable = False
