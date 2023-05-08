@@ -436,22 +436,22 @@ def marglik_optimization(model,
             marglik.backward()
 
             if shared_uv:
-                params = list(model.parameters())
+                paramlist = list(model.parameters())
                 names = [name for name, _ in model.named_parameters()]
-                for i, name_self in enumerate(names):
+                for param_i, name_self in enumerate(names):
                     if 'lin_U' in name_self:
                         name_other = name_self.replace('lin_U', 'lin_V')
-                        j = names.index(name_other)
+                        param_j = names.index(name_other)
                         
-                        i_weight = len(params[i].view(-1))
-                        j_weight = len(params[j].view(-1))
+                        i_weight = len(paramlist[param_i].view(-1))
+                        j_weight = len(paramlist[param_j].view(-1))
                         i_weight = i_weight / (i_weight + j_weight)
                         j_weight = j_weight / (i_weight + j_weight)
 
-                        mean_grad = i_weight * log_prior_prec.grad[i] + j_weight * log_prior_prec.grad[j]
+                        mean_grad = i_weight * log_prior_prec.grad[param_i] + j_weight * log_prior_prec.grad[param_j]
 
-                        log_prior_prec.grad.data[i] = mean_grad
-                        log_prior_prec.grad.data[j] = mean_grad
+                        log_prior_prec.grad[param_i] = mean_grad
+                        log_prior_prec.grad[param_j] = mean_grad
 
             margliks_local.append(marglik.item())
             if i < n_hypersteps_prior:
