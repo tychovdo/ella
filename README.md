@@ -1,6 +1,6 @@
-# Learning layer-wise equivariances automatically using gradients
+# ELLA (Equivariance Learning with Laplace Approximations)
 
-Code for NeurIPS 2023 paper: TODO
+This code accompanies our NeurIPS 2023 spotlight paper: [Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC) by Tycho F. A. van der Ouderaa, Alexander Immer, and Mark van der Wilk.
 
 ### Example usage
 
@@ -26,10 +26,3 @@ The Differentiable Laplace objective used in this repository performs better tha
 
 The code uses elements from [LILA](https://github.com/tychovdo/lila) (Immer, Alexander, et al. "Invariance learning in deep neural networks with differentiable Laplace approximations." NeurIPS 2022) and [RPP](https://github.com/mfinzi/residual-pathway-priors) (Finzi, Marc, Gregory Benton, and Andrew G. Wilson. "Residual pathway priors for soft equivariance constraints." NeurIPS 2021) repositories.
 
-### Citation
-
-If you build upon this work, please cite us:
-
-```
-
-```
