@@ -1,6 +1,9 @@
 # ELLA (Equivariance Learning with Laplace Approximations)
 
-This code accompanies our NeurIPS 2023 spotlight paper: [Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC) by Tycho F. A. van der Ouderaa, Alexander Immer, and Mark van der Wilk.
+This code accompanies our NeurIPS 2023 spotlight paper:
+
+[Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC)
+Tycho F. A. van der Ouderaa, Alexander Immer, and Mark van der Wilk.
 
 ### Example usage
 
