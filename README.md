@@ -2,7 +2,7 @@
 
 This code accompanies our NeurIPS 2023 spotlight paper:
 
-[Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC) <br>
+[Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC) </br>
 Tycho F. A. van der Ouderaa, Alexander Immer, and Mark van der Wilk.
 
 ### Example usage
