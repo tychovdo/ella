@@ -5,13 +5,19 @@ This code accompanies our NeurIPS 2023 spotlight paper:
 [Learning Layer-wise Equivariances Automatically using Gradients](https://openreview.net/pdf?id=bNIHdyunFC) </br>
 Tycho F. A. van der Ouderaa, Alexander Immer, and Mark van der Wilk.
 
-### Example usage
+### Example Usage
+
+For example, to learn layer-wise translational equivariances with sparsified parameterisation (S-FC + S-CONV) we can run:
 
 ```
-python classification_image.py 
+python classification_image.py --config configs/cifar10.yaml --model s_both --batch_size 128 --marglik_batch_size 150 --approx kron --lr 0.01 --n_epochs_burnin 10 --prior_prec 1.0 --n_epochs 4000 --data_augmentation --download
 ```
+
+The code uses `wandb` to log experiments (which requires setting up a [weights and biases](https://wandb.ai/site) account)
 
 ### Reproducing experiments
+
+Scripts for experiments performed in the paper can be found here:
 
 | Experiment  | Script location |
 | ------------- | ------------- |
@@ -19,7 +25,7 @@ python classification_image.py
 | Main CIFAR-10 (Sec. 6.2)  | `scripts/main_cifar10` |
 | Multiple groups (Sec. 6.3)  | `scripts/multiple_groups_mnist`, `scripts/multiple_groups_mnist` |
 
-Please get in touch if there are any issues replicating the experiments.
+Please get in touch if there are any questions about the code.
 
 ### Note on practical performance
 
