@@ -20,7 +20,7 @@ Please get in touch if there are any issues replicating the experiments.
 
 ### Note on practical performance
 
-The Differentiable Laplace objective used in this repository performs better than MAP but can be slower in training. Linearised Laplace approximations are an active research topic and are actively being improved. For instance, concurrent work ([Immer, Alexander, et al. "Stochastic marginal likelihood gradients using neural tangent kernels." ICML 2023.](https://github.com/aleximmer/ntk-marglik)) shows a 10x improvement of the Laplace approximation and should also be readily applicable to our setting.
+The Differentiable Laplace objective used in this repository performs better than MAP but can be slower in training. Linearised Laplace approximations are an active research topic and are actively being improved. For instance, concurrent work ([Immer, Alexander, et al. "Stochastic marginal likelihood gradients using neural tangent kernels." ICML 2023.](https://github.com/aleximmer/ntk-marglik)) shows Laplace approximations that give a 10x improvement and should be readily applicable to our setting.
 
 ### References
 
