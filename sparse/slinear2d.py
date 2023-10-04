@@ -473,7 +473,7 @@ class SLinearV(nn.Linear):
 
 
 class SLinear2d(nn.Module):
-    def __init__(self, in_channels, out_channels, in_shape=(28, 28), out_shape=(14, 14), bias=True):
+    def __init__(self, in_channels, out_channels, in_shape=(28, 28), out_shape=(14, 14), bias=True, learn_omega=False):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -481,8 +481,8 @@ class SLinear2d(nn.Module):
         self.out_shape = out_shape
         self.in_size = in_shape[0] * in_shape[1]
         self.out_size = out_shape[0] * out_shape[1]
-        self.lin_U = SLinearU(in_channels, self.in_size, out_channels, bias=True)
-        self.lin_V = SLinearV(out_channels, in_channels, self.out_size, bias=False) # <--- TODO: remove hardcoded bias
+        self.lin_U = SLinearU(in_channels, self.in_size, out_channels, bias=True, learn_omega=learn_omega)
+        self.lin_V = SLinearV(out_channels, in_channels, self.out_size, bias=False, learn_omega=learn_omega) # <--- TODO: remove hardcoded bias
 
         self.reset_parameters()
 

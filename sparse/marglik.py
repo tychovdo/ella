@@ -18,14 +18,17 @@ from laplace.curvature import AsdlGGN
 
 from sparse.sam import SAM
 from sparse.utils import (
-    wandb_log_invariance, wandb_log_prior, wandb_log_parameter_norm, wandb_log_effective_dimensionality
+    wandb_log_invariance, wandb_log_len, wandb_log_prior, wandb_log_parameter_norm, wandb_log_effective_dimensionality, wandb_log_normalised_effective_dimensionality
 )
 
 GB_FACTOR = 1024 ** 3
 
+def params(model):
+    return list([p for n, p in model.named_parameters() if 'omega' not in n])
+
 
 def expand_prior_precision(prior_prec, model):
-    theta = parameters_to_vector(model.parameters())
+    theta = parameters_to_vector(params(model))
     device, P = theta.device, len(theta)
     assert prior_prec.ndim == 1
     if len(prior_prec) == 1:  # scalar
@@ -34,7 +37,7 @@ def expand_prior_precision(prior_prec, model):
         return prior_prec.to(device)
     else:
         return torch.cat([delta * torch.ones_like(m).flatten() for delta, m
-                          in zip(prior_prec, model.parameters())])
+                          in zip(prior_prec, params(model))])
 
 
 def get_prior_hyperparams(prior_prec_init, prior_structure, H, P, device):
@@ -173,7 +176,8 @@ def marglik_optimization(model,
                          use_wandb=False,
                          curvature=False,
                          shared_uv=False,
-                         omega_hyper=False):
+                         omega_hyper=False,
+                         log_weights=False):
     """Runs marglik optimization training for a given model and training dataloader.
 
     Parameters
@@ -244,8 +248,8 @@ def marglik_optimization(model,
         partial_loader = marglik_loader
     device = parameters_to_vector(model.parameters()).device
     N = len(train_loader.dataset)
-    H = len(list(model.parameters()))
-    P = len(parameters_to_vector(model.parameters()))
+    H = len(list(params(model)))
+    P = len(parameters_to_vector(params(model)))
     optimize_aug = augmenter is not None and parameters_to_vector(augmenter.parameters()).requires_grad
     backend_kwargs = dict(differentiable=(stochastic_grad and optimize_aug) or laplace is FunctionalLaplace, 
                           kron_jac=kron_jac)
@@ -299,12 +303,25 @@ def marglik_optimization(model,
     losses = list()
     valid_perfs = list()
     margliks = list()
+    weights = list()
 
     for epoch in range(1, n_epochs + 1):
         epoch_loss = 0
         epoch_perf = 0
         epoch_nll = 0
         epoch_log = dict()
+
+        if log_weights:
+            for named_params in weights:
+                path = result_path / f"{epoch}"
+
+                path.mkdir(parents=True, exist_ok=True)
+                for name, param in named_params:
+                    file = path / f"{name}.pkl"
+                    with open(file, 'wb') as f:
+                        pickle.dump(param.detach().cpu().numpy(), f)
+
+            weights.append(model.named_parameters())
 
         # standard NN training per batch
         torch.cuda.empty_cache()
@@ -317,18 +334,23 @@ def marglik_optimization(model,
             else:
                 crit_factor = 1 / temperature
             prior_prec = torch.exp(log_prior_prec).detach()
+
             delta = expand_prior_precision(prior_prec, model)
+
             if method == 'lila':
                 f = model(X).mean(dim=1)
             else:
                 f = model(X)
+
+            def log_prior(theta, N, crit_factor):
+                return (0.5 * (delta * theta) @ theta) / N / crit_factor
 
             if sam:
                 # 1. step
                 loss = criterion(f, y)
                 if sam_with_prior:
                     theta = parameters_to_vector(model.parameters())
-                    loss += (0.5 * (delta * theta) @ theta) / N / crit_factor
+                    loss += log_prior(theta, N, crit_factor)
                 loss.backward()
                 optimizer.first_step(zero_grad=True)
                 # 2. step
@@ -337,13 +359,13 @@ def marglik_optimization(model,
                 else:
                     f = model(X)
                 theta = parameters_to_vector(model.parameters())
-                loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
+                loss = criterion(f, y) + log_prior(theta, N, crit_factor)
                 loss.backward()
                 optimizer.second_step(zero_grad=True)
             else:
-                theta = parameters_to_vector(model.parameters())
+                theta = parameters_to_vector(params(model))
 
-                loss = criterion(f, y) + (0.5 * (delta * theta) @ theta) / N / crit_factor
+                loss = criterion(f, y) + log_prior(theta, N, crit_factor)
                 loss.backward()
                 optimizer.step()
 
@@ -484,8 +506,10 @@ def marglik_optimization(model,
             marglik_loader.data_factor = N / original_subset_size
 
         if use_wandb:
+            wandb_log_len(model)
             wandb_log_prior(torch.exp(log_prior_prec.detach()), prior_structure, model)
             wandb_log_effective_dimensionality(lap.effective_dimensionality, prior_structure, model)
+            wandb_log_normalised_effective_dimensionality(lap.effective_dimensionality, prior_structure, model)
         if likelihood == 'regression':
             epoch_log['hyperparams/sigma_noise'] = torch.exp(log_sigma_noise.detach()).cpu().item()
         epoch_log['train/marglik'] = marglik
@@ -560,8 +584,8 @@ def marglik_optimization(model,
                   **la_kwargs)
     lap.fit(marglik_loader.detach())
     if optimize_aug:
-        return lap, model, margliks, valid_perfs, aug_history
-    return lap, model, margliks, valid_perfs, None
+        return lap, model, margliks, valid_perfs, aug_history, weights
+    return lap, model, margliks, valid_perfs, None, weights
 
 
 # def stochastic_marglik_optimization(model,

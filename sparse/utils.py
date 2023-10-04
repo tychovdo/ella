@@ -273,4 +273,23 @@ def wandb_log_effective_dimensionality(effect_dim, prior_structure, model):
         )}
         wandb.log(log, commit=False)
 
+def wandb_log_normalised_effective_dimensionality(effect_dim, prior_structure, model):
+    if prior_structure == 'scalar':
+        wandb.log({'hyperparams/norm_effect_dim': effect_dim[0] / len(parameters_to_vector(model.parameters()))}, commit=False)
+    elif prior_structure == 'layerwise':
+        log = {f'hyperparams/norm_effect_dim_{n}': e / len(p.reshape(-1)) for e, (n, p) in
+               zip(effect_dim, model.named_parameters())}
+        wandb.log(log, commit=False)
+    elif prior_structure == 'diagonal':
+        raise NotImplementedError(f"TODO:")
+        hist, edges = effect_dim.data.cpu().histogram(bins=64)
+        log = {f'hyperparams/norm_effect_dim': wandb.Histogram(
+            np_histogram=(hist.numpy().tolist(), edges.numpy().tolist())
+        )}
+        wandb.log(log, commit=False)
+
+def wandb_log_len(model):
+    log = {f'hyperparams/len_{n}': len(p.view(-1)) for n, p in model.named_parameters()}
+    wandb.log(log, commit=False)
+
 
