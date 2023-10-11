@@ -38,6 +38,7 @@ pip install .
 cd ../..
 cd dependencies/laplace
 pip install .
+cd ../..
 ```
 
 ###### Note on practical performance
