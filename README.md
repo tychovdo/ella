@@ -29,13 +29,14 @@ Please get in touch if there are any questions about the code.
 
 ### Setup and dependencies
 
-This project uses patched versions of [Laplace](https://github.com/aleximmer/Laplace/tree/main) and [ASDL](https://github.com/kazukiosawa/asdl) libraries. For experiments, we use python 3.9. Dependencies can be installed by running:
+For experiments, we use python 3.9. Dependencies can be installed by running:
 
 ```
 pip install -r requirements.txt
 cd dependencies/asdl && pip install . && cd ../..
 cd dependencies/laplace && pip install . && cd ../..
 ```
+This should automatically install patched versions of [Laplace](https://github.com/aleximmer/Laplace/tree/main) and [ASDL](https://github.com/kazukiosawa/asdl) libraries. 
 
 ###### Note on practical performance
 
