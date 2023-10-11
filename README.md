@@ -33,12 +33,8 @@ For experiments, we use python 3.9. Dependencies can be installed by running:
 
 ```
 pip install -r requirements.txt
-cd dependencies/asdl
-pip install .
-cd ../..
-cd dependencies/laplace
-pip install .
-cd ../..
+cd dependencies/asdl && pip install . && cd ../..
+cd dependencies/laplace && pip install . && cd ../..
 ```
 
 ###### Note on practical performance
