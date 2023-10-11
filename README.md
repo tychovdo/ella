@@ -29,7 +29,7 @@ Please get in touch if there are any questions about the code.
 
 ### Setup and dependencies
 
-For experiments, we use python 3.9. Dependencies can be installed by running:
+This project uses patched versions of [Laplace](https://github.com/aleximmer/Laplace/tree/main) and [ASDL](https://github.com/kazukiosawa/asdl) libraries. For experiments, we use python 3.9. Dependencies can be installed by running:
 
 ```
 pip install -r requirements.txt
