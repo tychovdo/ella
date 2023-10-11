@@ -27,7 +27,20 @@ Scripts for experiments performed in the paper can be found here:
 
 Please get in touch if there are any questions about the code.
 
-### Note on practical performance
+### Setup and dependencies
+
+For experiments, we use python 3.9. Dependencies can be installed by running:
+
+```
+pip install -r requirements.txt
+cd dependencies/asdl
+pip install .
+cd ../..
+cd dependencies/laplace
+pip install .
+```
+
+###### Note on practical performance
 
 The Differentiable Laplace objective used in this repository performs better than MAP but can be slower in training. Linearised Laplace approximations are an active research topic and are actively being improved. For instance, concurrent work ([Immer, Alexander, et al. "Stochastic marginal likelihood gradients using neural tangent kernels." ICML 2023.](https://github.com/aleximmer/ntk-marglik)) shows Laplace approximations that give a 10x improvement and should be readily applicable to our setting.
 
